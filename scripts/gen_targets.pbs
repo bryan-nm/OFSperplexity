@@ -67,8 +67,19 @@ NRANKS=$(( NNODES * RANKS_PER_NODE ))
 
 echo "job=$PBS_JOBID nodes=$NNODES ranks=$NRANKS -> $OUT.rankNNNN.pt"
 
+# Resolve python to an ABSOLUTE path from the active venv. mpiexec launches ranks
+# with a fresh PATH resolution on each node; passing a bare `python` can fail to
+# exec (-> exit 127, no rank output). An absolute path on /flare is visible to every
+# compute node and sidesteps PATH-forwarding entirely.
+PYTHON=$(command -v python)
+echo "[preflight] python = $PYTHON"
+# Fail fast with a clear message if the env/package isn't importable (distinguishes
+# "package not installed" from "mpiexec couldn't exec python").
+"$PYTHON" -c "import ofsperplexity, torch; print('[preflight] import OK; torch', torch.__version__)" \
+    || { echo "[preflight] FAILED to import ofsperplexity/torch -- check the venv is activated and 'pip install -e .' ran"; exit 1; }
+
 mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
-    python -m ofsperplexity.cli gen-targets \
+    "$PYTHON" -m ofsperplexity.cli gen-targets \
         --device xpu \
         --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
         --input "$INPUT" --out "$OUT" --max-len "$MAX_LEN" \

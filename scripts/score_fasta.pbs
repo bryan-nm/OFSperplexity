@@ -54,8 +54,15 @@ NRANKS=$(( NNODES * RANKS_PER_NODE ))
 echo "job=$PBS_JOBID nodes=$NNODES ranks=$NRANKS model=$MODEL_KIND"
 echo "input=$INPUT -> out=$OUT"
 
+# Absolute python path from the active venv (bare `python` under mpiexec can fail to
+# exec -> exit 127). Preflight the import so env problems surface with a clear message.
+PYTHON=$(command -v python)
+echo "[preflight] python = $PYTHON"
+"$PYTHON" -c "import ofsperplexity, torch; print('[preflight] import OK; torch', torch.__version__)" \
+    || { echo "[preflight] FAILED to import ofsperplexity/torch -- check the venv + 'pip install -e .'"; exit 1; }
+
 mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
-    python -m ofsperplexity.cli score \
+    "$PYTHON" -m ofsperplexity.cli score \
         --device xpu \
         --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
         --method ofs --head "$HEAD" \
