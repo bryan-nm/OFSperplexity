@@ -164,8 +164,9 @@ ofsperplexity/
   models/        Reference loaders: esmc.py, amplify.py (xformers shim + XPU patch)
 docs/            INTEGRATION.md (wire-in guide), METHOD.md (design notes)
 examples/        integrate_training_loop.py, minimal_score.py
-scripts/         Aurora PBS: score_fasta.pbs, gen_targets.pbs, train_head.pbs
-tests/           test_smoke.py
+scripts/         preprocess_uniref.py (raw UniRef90 -> curated FASTA) + Aurora PBS
+                 (preprocess_uniref, gen_targets, train_head, score_fasta)
+tests/           test_smoke.py, test_preprocess.py
 ```
 
 See [`docs/METHOD.md`](docs/METHOD.md) for how each design decision maps to the

@@ -24,9 +24,9 @@
 # sequences (paper scale), not the whole database. CALIBRATE on one tile first.
 #
 # ---- Data prep (UniRef90) --------------------------------------------------------
-#   1. take UniRef90 representatives, filter to <=512 aa (L^2 cost; 700 also ok)
-#   2. randomly subsample to your tier's #seqs and SHUFFLE (spreads length -> shards)
-#   (UniRef90 is already 90%-dereplicated; mmseqs2 50% clustering is optional.)
+# Run scripts/preprocess_uniref.pbs (or preprocess_uniref.py) FIRST to turn the raw
+# uniref90.fasta.gz into the subsampled, length-filtered, shuffled FASTA used as
+# INPUT below. UniRef90 already contains SwissProt -- we keep it (no exclusion).
 #
 # Submit from the repo root:  qsub scripts/gen_targets.pbs
 

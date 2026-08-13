@@ -17,11 +17,23 @@ The paper used Swissprot filtered to < 700 aa and clustered at 50% identity —
 order 10⁵ representative sequences, i.e. tens of millions of positions. That is the
 target scale.
 
-**Recommended data prep:** take UniRef90 representatives, filter to ≤ 700 aa (ideally
-≤ 512 — see the L² note), and **randomly subsample** to the tier you want below.
-(UniRef90 is already dereplicated at 90%; further mmseqs2 clustering at 50% is
-optional and only reduces redundancy.) Shuffle the FASTA so length is spread across
-shards.
+**Recommended data prep:** take the raw UniRef90 FASTA, filter to ≤ 512 aa (the L²
+cost lever), and **reservoir-subsample** to the tier you want below. UniRef90 is
+already dereplicated at 90% and *contains the SwissProt entries* (UniRef = UniProt =
+SwissProt + TrEMBL), so we keep everything — no SwissProt exclusion. The reservoir
+sample is uniform and already shuffled, which balances length across MPI shards.
+
+This is done by [`scripts/preprocess_uniref.py`](../scripts/preprocess_uniref.py)
+(stdlib-only, streams the gzip, single pass) — run it directly or via
+[`scripts/preprocess_uniref.pbs`](../scripts/preprocess_uniref.pbs):
+
+```bash
+python scripts/preprocess_uniref.py uniref90.fasta.gz uniref90_100k.fasta \
+    --num 100000 --min-len 30 --max-len 512 --seed 0
+```
+
+Further mmseqs2 clustering at 50% identity is optional (the paper did it on
+SwissProt) and only reduces residual redundancy.
 
 ## Cost model (validated)
 

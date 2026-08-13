@@ -31,6 +31,7 @@ Read [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — it is written for you. Sum
 | the model-agnostic seam | `ofsperplexity/adapters.py` |
 | token↔amino-acid mapping | `ofsperplexity/alphabet.py` |
 | FASTA I/O, batching | `ofsperplexity/data.py` |
+| curate raw UniRef90 -> training FASTA | `scripts/preprocess_uniref.py` |
 | device + distributed (Aurora) | `ofsperplexity/dist.py` |
 | the reference encoder loaders | `ofsperplexity/models/{esmc,amplify}.py` |
 | CLI | `ofsperplexity/cli.py` (`ofs-pppl {score,gen-targets,train}`) |

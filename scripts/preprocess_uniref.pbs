@@ -1,0 +1,38 @@
+#!/bin/bash -l
+#PBS -A NLDesignProtein
+#PBS -N ofs_preprocess
+#PBS -l walltime=02:00:00
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l filesystems=home_fs:flare_fs
+#PBS -q capacity
+#PBS -j oe
+#
+# Step 0 of head training: curate the raw UniRef90 FASTA into a subsampled FASTA for
+# gen_targets.pbs. SINGLE node, CPU only, no mpiexec -- one Python process streams
+# the (~gzip) file once and reservoir-samples N sequences. Torch-free, so it can also
+# be run directly on a login/DTN node without a queue slot.
+#
+# Choose --num from the tier you plan to train (see docs/SIZING.md):
+#   Minimal 25000 | RECOMMENDED 100000 | Generous 500000 | Excessive 5000000
+# Streaming ~190M sequences is I/O-bound; budget ~1-2 h for a full UniRef90 pass.
+#
+# Submit from the repo root:  qsub scripts/preprocess_uniref.pbs
+
+cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
+
+module load frameworks 2>/dev/null || true   # not required (stdlib only), but harmless
+
+# ----- inputs (edit) ----------------------------------------------------------
+RAW=/flare/NLDesignProtein/bryan/data/uniref90.fasta.gz
+OUT=/flare/NLDesignProtein/bryan/data/uniref90_rep_le512_100k_shuf.fasta
+NUM=100000
+MIN_LEN=30
+MAX_LEN=512
+
+echo "job=$PBS_JOBID  $RAW -> $OUT  (num=$NUM, len $MIN_LEN..$MAX_LEN)"
+
+python scripts/preprocess_uniref.py "$RAW" "$OUT" \
+    --num "$NUM" --min-len "$MIN_LEN" --max-len "$MAX_LEN" --seed 0
+
+echo "exit=$?"
