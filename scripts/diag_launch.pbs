@@ -1,0 +1,53 @@
+#!/bin/bash -l
+#PBS -A NLDesignProtein
+#PBS -N ofs_diag
+#PBS -l walltime=00:15:00
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l filesystems=home_fs:flare_fs
+#PBS -q debug
+#PBS -j oe
+#
+# Diagnostic for the `exit=127` launch failure. Runs progressive mpiexec probes and
+# prints the return code after each. The FIRST probe that fails pinpoints the layer.
+# Nothing here is destructive; it just launches `hostname` / tiny python one-liners.
+#
+# Submit:  qsub scripts/diag_launch.pbs   (then paste the whole .o file back)
+
+cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
+module load frameworks
+source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate
+
+RANKS_PER_NODE=12
+NNODES=$(wc -l < "$PBS_NODEFILE")
+NRANKS=$(( NNODES * RANKS_PER_NODE ))
+PYTHON=$(command -v python)
+
+echo "=================== ENV ==================="
+echo "mpiexec = $(command -v mpiexec || echo NOT-FOUND)"
+echo "python  = $PYTHON"
+echo "NRANKS  = $NRANKS  (NNODES=$NNODES x $RANKS_PER_NODE)"
+echo "which python (PATH resolution) = $(which python)"
+echo
+
+echo "=== probe 1: bare launcher + system binary (no python, no pmix, no bind) ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" hostname
+echo "rc1=$?"; echo
+
+echo "=== probe 2: + --pmi=pmix ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix hostname
+echo "rc2=$?"; echo
+
+echo "=== probe 3: launch the venv python under mpiexec (1 rank, no pmix/bind) ==="
+mpiexec -n 1 -ppn 1 "$PYTHON" -c "import sys; print('python runs under mpiexec:', sys.executable)"
+echo "rc3=$?"; echo
+
+echo "=== probe 4: + torch import under mpiexec (tests env/LD_LIBRARY_PATH forwarding) ==="
+mpiexec -n 1 -ppn 1 "$PYTHON" -c "import torch; print('torch', torch.__version__)"
+echo "rc4=$?"; echo
+
+echo "=== probe 5: the exact gen-targets launch flags, import only (all ranks) ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "${OMP_NUM_THREADS:-8}" \
+    "$PYTHON" -c "import os, ofsperplexity; print('rank', os.environ.get('PALS_RANKID'), 'ofs import ok')"
+echo "rc5=$?"; echo
+echo "=================== DONE ==================="
