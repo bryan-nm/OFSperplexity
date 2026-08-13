@@ -44,6 +44,18 @@ MAX_LEN=512
 export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+# --- oneCCL / fabric (match mini-embed-filip pbs_common.sh; REQUIRED at scale) ---
+# Without these the CXI (Slingshot) NIC runs out of PTEs/TXQs/LEs/... at launch:
+#   "CXI alloc failed on cxiN: request exceeds ... limits" -> mpiexec start fails.
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_ATL_TRANSPORT=mpi          # CCL rides MPI's endpoints -> no separate CXI alloc
+export CCL_KVS_MODE=mpi
+export CCL_KVS_CONNECTION_TIMEOUT=600
+export CCL_ZE_IPC_EXCHANGE=pidfd
+export FI_PROVIDER=cxi
+# gen-targets is embarrassingly parallel: MPI is used ONLY for host-side rank/size +
+# a barrier (no GPU-aware collectives), so shed GPU-aware MPI's per-rank CXI reservations.
+export MPICH_GPU_SUPPORT_ENABLED=0
 
 RANKS_PER_NODE=12
 NNODES=$(wc -l < "$PBS_NODEFILE")
