@@ -1,0 +1,53 @@
+#!/bin/bash -l
+#PBS -A NLDesignProtein
+#PBS -N ofs_score
+#PBS -l walltime=01:00:00
+#PBS -l select=2
+#PBS -l place=scatter
+#PBS -l filesystems=home_fs:flare_fs
+#PBS -q debug
+#PBS -j oe
+#
+# Score a FASTA with OFS pseudo-perplexity across Aurora tiles (one rank/tile).
+# Follows the mini-embed-filip PBS convention: cd to the repo, load frameworks,
+# activate the env, set the oneAPI/fabric env AFTER the module load, then launch
+# one rank per tile with `mpiexec ... --pmi=pmix`. Each rank scores a strided
+# shard; rank 0 merges into a single TSV.
+#
+# Submit from the repo root:  qsub scripts/score_fasta.pbs
+
+cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
+
+# ----- environment (edit these two for your site) -----------------------------
+module load frameworks
+source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate   # or `pip install -e . --no-deps` target
+
+# ----- inputs (edit) ----------------------------------------------------------
+MODEL_KIND=amplify
+MODEL_PATH=/flare/NLDesignProtein/bryan/models/SaAMPLIFY_350M
+HEAD=/flare/NLDesignProtein/bryan/ofs_heads/amplify_ofs_head.pt
+INPUT=/flare/NLDesignProtein/bryan/data/sequences.fasta
+OUT=/flare/NLDesignProtein/bryan/out/sequences.pppl.tsv
+
+# ----- Aurora device / fabric env (after module load, so exports stick) -------
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"   # avoid OpenCL double-enumeration of tiles
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+
+# ----- topology: 12 ranks/node = one per Aurora tile --------------------------
+RANKS_PER_NODE=12
+NNODES=$(wc -l < "$PBS_NODEFILE")
+NRANKS=$(( NNODES * RANKS_PER_NODE ))
+
+echo "job=$PBS_JOBID nodes=$NNODES ranks=$NRANKS model=$MODEL_KIND"
+echo "input=$INPUT -> out=$OUT"
+
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
+    python -m ofsperplexity.cli score \
+        --device xpu \
+        --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
+        --method ofs --head "$HEAD" \
+        --input "$INPUT" --out "$OUT" \
+        --max-tokens 16384
+
+echo "exit=$?"

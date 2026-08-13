@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ofsperplexity"
+version = "0.1.0"
+description = "One Fell Swoop pseudo-perplexity for protein language models (ESMC, AMPLIFY, and any masked encoder). Fast, distributed, Aurora-XPU ready."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "The Natural Machine" }]
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# Only needed to *load* the reference encoders from disk. The core scoring
+# library does not import transformers -- it works on any object that exposes
+# hidden states + logits (see ofsperplexity.adapters).
+models = [
+    "transformers>=4.40",
+    "tokenizers>=0.15",
+    "safetensors>=0.4",
+    "pyyaml>=6.0",
+]
+# Distributed launch on Aurora / other MPI clusters.
+dist = [
+    "mpi4py>=3.1",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+ofs-pppl = "ofsperplexity.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ofsperplexity*"]

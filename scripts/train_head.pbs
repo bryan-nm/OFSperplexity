@@ -1,0 +1,44 @@
+#!/bin/bash -l
+#PBS -A NLDesignProtein
+#PBS -N ofs_train_head
+#PBS -l walltime=00:30:00
+#PBS -l select=1
+#PBS -l place=scatter
+#PBS -l filesystems=home_fs:flare_fs
+#PBS -q debug
+#PBS -j oe
+#
+# Fit the OFS head from precomputed targets (see gen_targets.pbs). The head is
+# ~7M params -- a single tile, single process, minutes. If you skipped
+# gen_targets, this script can also generate targets inline from a FASTA (slower);
+# see the commented alternative below.
+#
+# Submit from the repo root:  qsub scripts/train_head.pbs
+
+cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
+
+module load frameworks
+source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate
+
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
+TARGETS_GLOB=/flare/NLDesignProtein/bryan/ofs_targets/amplify_targets.pt.rank*
+HEAD_OUT=/flare/NLDesignProtein/bryan/ofs_heads/amplify_ofs_head.pt
+
+echo "job=$PBS_JOBID  targets=$TARGETS_GLOB -> $HEAD_OUT"
+
+# Single process (no mpiexec): fitting the tiny head does not shard.
+python -m ofsperplexity.cli train \
+    --device xpu \
+    --targets $TARGETS_GLOB \
+    --head "$HEAD_OUT" \
+    --num-members 8 --epochs 40 --train-batch-size 4096 --lr 1e-3
+
+# --- Alternative: generate targets inline from a FASTA (no gen_targets step) ---
+# python -m ofsperplexity.cli train --device xpu \
+#     --model-kind amplify --model-path /path/to/SaAMPLIFY_350M \
+#     --input /path/to/representative.fasta --max-len 700 \
+#     --head "$HEAD_OUT" --num-members 8 --epochs 40
+
+echo "exit=$?"

@@ -1,0 +1,30 @@
+# Conda environment for OFSperplexity.
+#
+# Same shape as mini-embed-filip: pip-only inside conda to avoid the macOS libomp
+# clash between conda's llvm-openmp and the libomp bundled in the pip torch wheel.
+#
+#   * On Linux CUDA hosts, swap the pip `torch` line for the matching CUDA wheel.
+#   * On Intel XPU hosts (Aurora), DO NOT install torch from pip -- get torch +
+#     intel-extension-for-pytorch + oneccl_bindings_for_pytorch from
+#     `module load frameworks`, and install this package with `pip install -e .
+#     --no-deps` on top of that module's Python.
+#
+# The core scoring library only needs torch + numpy. `transformers` etc. are only
+# needed to load the reference encoders (ESMC / AMPLIFY) from disk.
+
+name: ofsperplexity
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - torch>=2.4
+      - numpy>=1.24
+      # --- optional: only to load the reference encoders (the `models` extra) ---
+      - transformers>=4.40   # ESMC needs a build recognising model_type "esmc" (>=4.57 recommended)
+      - tokenizers>=0.15
+      - safetensors>=0.4
+      - pyyaml>=6.0          # AMPLIFY's amplify.py imports yaml at module load
+      # --- optional: distributed launch ---
+      - mpi4py>=3.1          # topology detection under mpiexec on Aurora

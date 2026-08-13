@@ -1,0 +1,45 @@
+#!/bin/bash -l
+#PBS -A NLDesignProtein
+#PBS -N ofs_gen_targets
+#PBS -l walltime=03:00:00
+#PBS -l select=8
+#PBS -l place=scatter
+#PBS -l filesystems=home_fs:flare_fs
+#PBS -q capacity
+#PBS -j oe
+#
+# Generate OFS-head distillation targets (the exact one-at-a-time calculation) for
+# a representative FASTA, sharded across tiles. This is the expensive step; scale
+# `select=` to your corpus. Each rank writes its own `<out>.rankNNNN.pt`; pass them
+# all to `train_head.pbs` / `ofs-pppl train --targets`.
+#
+# Submit from the repo root:  qsub scripts/gen_targets.pbs
+
+cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
+
+module load frameworks
+source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate
+
+MODEL_KIND=amplify
+MODEL_PATH=/flare/NLDesignProtein/bryan/models/SaAMPLIFY_350M
+INPUT=/flare/NLDesignProtein/bryan/data/swissprot_lt700_clust50.fasta  # curated: <700 aa, 50% id
+OUT=/flare/NLDesignProtein/bryan/ofs_targets/amplify_targets.pt
+MAX_LEN=700
+
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+
+RANKS_PER_NODE=12
+NNODES=$(wc -l < "$PBS_NODEFILE")
+NRANKS=$(( NNODES * RANKS_PER_NODE ))
+
+echo "job=$PBS_JOBID nodes=$NNODES ranks=$NRANKS -> $OUT.rankNNNN.pt"
+
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
+    python -m ofsperplexity.cli gen-targets \
+        --device xpu \
+        --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
+        --input "$INPUT" --out "$OUT" --max-len "$MAX_LEN"
+
+echo "exit=$?"
