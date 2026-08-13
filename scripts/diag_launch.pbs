@@ -50,4 +50,17 @@ echo "=== probe 5: the exact gen-targets launch flags, import only (all ranks) =
 mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "${OMP_NUM_THREADS:-8}" \
     "$PYTHON" -c "import os, ofsperplexity; print('rank', os.environ.get('PALS_RANKID'), 'ofs import ok')"
 echo "rc5=$?"; echo
+
+echo "=== probe 6: isolate --cpu-bind depth -d 8 (12 ranks, hostname, no python) ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d 8 hostname
+echo "rc6=$?"; echo
+
+echo "=== probe 7: full python import at 12 ranks WITHOUT --cpu-bind (the proposed fix) ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix \
+    "$PYTHON" -c "import os, ofsperplexity; print('rank', os.environ.get('PALS_RANKID'), 'ofs import ok')"
+echo "rc7=$?"; echo
+
+echo "=== probe 8: alternate binding syntax --cpu-bind depth (no -d) ==="
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth hostname
+echo "rc8=$?"; echo
 echo "=================== DONE ==================="

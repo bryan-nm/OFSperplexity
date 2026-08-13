@@ -61,7 +61,9 @@ echo "[preflight] python = $PYTHON"
 "$PYTHON" -c "import ofsperplexity, torch; print('[preflight] import OK; torch', torch.__version__)" \
     || { echo "[preflight] FAILED to import ofsperplexity/torch -- check the venv + 'pip install -e .'"; exit 1; }
 
-mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
+# --cpu-bind depth -d N makes PALS 1.8 fail to launch here (exit 127); omitted --
+# it is only a host-side perf tweak and this is an XPU job. See scripts/diag_launch.pbs.
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix \
     "$PYTHON" -m ofsperplexity.cli score \
         --device xpu \
         --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \

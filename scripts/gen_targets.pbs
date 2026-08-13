@@ -78,7 +78,10 @@ echo "[preflight] python = $PYTHON"
 "$PYTHON" -c "import ofsperplexity, torch; print('[preflight] import OK; torch', torch.__version__)" \
     || { echo "[preflight] FAILED to import ofsperplexity/torch -- check the venv is activated and 'pip install -e .' ran"; exit 1; }
 
-mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth -d "$OMP_NUM_THREADS" \
+# NOTE: `--cpu-bind depth -d N` makes PALS 1.8 fail to launch here (exit 127, no
+# output); see scripts/diag_launch.pbs. CPU binding is only a host-side perf tweak
+# and this is an XPU job, so we omit it. Re-add a working binding later if desired.
+mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix \
     "$PYTHON" -m ofsperplexity.cli gen-targets \
         --device xpu \
         --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
