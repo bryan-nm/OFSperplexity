@@ -25,9 +25,9 @@ source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate   # or `pip instal
 # ----- inputs (edit) ----------------------------------------------------------
 MODEL_KIND=amplify
 MODEL_PATH=/flare/NLDesignProtein/bryan/models/SaAMPLIFY_350M
-HEAD=/flare/NLDesignProtein/bryan/ofs_heads/amplify_ofs_head.pt
-INPUT=/flare/NLDesignProtein/bryan/data/sequences.fasta
-OUT=/flare/NLDesignProtein/bryan/out/sequences.pppl.tsv
+HEAD=/flare/NLDesignProtein/bryan/Diffusion-dev-space/ofs_heads/amplify_ofs_head.pt
+INPUT=/flare/NLDesignProtein/bryan/Diffusion-dev-space/test_sequences.fasta
+OUT=/flare/NLDesignProtein/bryan/Diffusion-dev-space/test_sequences.pppl.tsv
 
 # ----- Aurora device / fabric env (after module load, so exports stick) -------
 export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"   # avoid OpenCL double-enumeration of tiles

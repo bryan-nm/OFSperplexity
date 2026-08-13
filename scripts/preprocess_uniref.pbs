@@ -1,11 +1,11 @@
 #!/bin/bash -l
 #PBS -A NLDesignProtein
 #PBS -N ofs_preprocess
-#PBS -l walltime=02:00:00
+#PBS -l walltime=01:00:00
 #PBS -l select=1
 #PBS -l place=scatter
 #PBS -l filesystems=home_fs:flare_fs
-#PBS -q capacity
+#PBS -q debug
 #PBS -j oe
 #
 # Step 0 of head training: curate the raw UniRef90 FASTA into a subsampled FASTA for
@@ -24,7 +24,7 @@ cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
 module load frameworks 2>/dev/null || true   # not required (stdlib only), but harmless
 
 # ----- inputs (edit) ----------------------------------------------------------
-RAW=/flare/NLDesignProtein/bryan/data/uniref90.fasta.gz
+RAW=/flare/NLDesignProtein/bryan/Diffusion-dev-space/datasets/uniref90.fasta.gz
 OUT=/flare/NLDesignProtein/bryan/data/uniref90_rep_le512_100k_shuf.fasta
 NUM=100000
 MIN_LEN=30

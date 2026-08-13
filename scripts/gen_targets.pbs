@@ -37,8 +37,8 @@ source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate
 
 MODEL_KIND=amplify
 MODEL_PATH=/flare/NLDesignProtein/bryan/models/SaAMPLIFY_350M
-INPUT=/flare/NLDesignProtein/bryan/data/uniref90_rep_le512_100k_shuf.fasta  # prepped: see header
-OUT=/flare/NLDesignProtein/bryan/ofs_targets/amplify_targets.pt
+INPUT=/flare/NLDesignProtein/bryan/Diffusion-dev-space/datasets/uniref90_rep_le512_100k_shuf.fasta  # prepped: see header
+OUT=/flare/NLDesignProtein/bryan/Diffusion-dev-space/ofs_targets/amplify_targets.pt
 MAX_LEN=512
 
 export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
