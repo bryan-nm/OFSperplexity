@@ -32,6 +32,18 @@ def _add_common_model_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--dtype", default=None, choices=[None, "float32", "bfloat16", "float16"])
 
 
+def _log_topology(info: DistInfo) -> None:
+    """One line per rank so a mis-detected world_size (e.g. every rank thinks it is
+    rank 0/1) is immediately visible in the job log rather than silently corrupting
+    the shard split."""
+    print(f"[dist] rank {info.rank}/{info.world_size} local={info.local_rank} "
+          f"device={info.device}", file=sys.stderr, flush=True)
+    if info.world_size == 1 and any(k in os.environ for k in ("PBS_JOBID", "PALS_NRANKS")):
+        print("[dist] WARNING: world_size=1 under a batch launcher -- ranks are not "
+              "sharding. Check the launcher sets PALS_NRANKS (see scripts/*.pbs).",
+              file=sys.stderr, flush=True)
+
+
 def _load_encoder(args, info: DistInfo):
     from .models import load_encoder
 
@@ -48,6 +60,7 @@ def _load_encoder(args, info: DistInfo):
 # --------------------------------------------------------------------- score
 def cmd_score(args) -> None:
     info = init_distributed(args.device, init_pg=False)
+    _log_topology(info)
     enc = _load_encoder(args, info)
     records = read_sequences(args.input)
     mine = [records[i] for i in shard_indices(len(records), info)]
@@ -117,6 +130,7 @@ def cmd_gen_targets(args) -> None:
     from .train import generate_targets
 
     info = init_distributed(args.device, init_pg=False)
+    _log_topology(info)
     enc = _load_encoder(args, info)
     records = read_sequences(args.input)
     if args.max_len:
@@ -139,6 +153,7 @@ def cmd_train(args) -> None:
     from .train import TargetSet, TrainConfig, generate_targets, train_ofs_head
 
     info = init_distributed(args.device, init_pg=False)
+    _log_topology(info)
     if args.targets:
         parts = [TargetSet.load(p) for p in args.targets]
         ts = TargetSet.concat(parts) if len(parts) > 1 else parts[0]

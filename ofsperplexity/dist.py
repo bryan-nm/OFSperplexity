@@ -22,6 +22,7 @@ with the ``xccl``/``ccl`` backend if you want data-parallel gradient averaging.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -30,14 +31,20 @@ import torch
 # Optional Intel stacks -- present on Aurora via `module load frameworks`, absent
 # on a laptop. Importing IPEX enables XPU; importing the oneCCL bindings registers
 # the legacy "ccl" backend for torch.distributed.
-try:  # noqa: SIM105
+try:  # noqa: SIM105  -- enables the XPU device; needed for any XPU work
     import intel_extension_for_pytorch as _ipex  # noqa: F401
 except Exception:  # pragma: no cover
     _ipex = None
-try:
-    import oneccl_bindings_for_pytorch  # noqa: F401
-except Exception:  # pragma: no cover
-    pass
+
+
+def _load_oneccl() -> None:
+    """Register the oneCCL ``ccl`` backend. Imported lazily -- ONLY when a collective
+    process group is actually initialised -- so the embarrassingly-parallel jobs
+    never load a fabric-touching component."""
+    try:
+        import oneccl_bindings_for_pytorch  # noqa: F401
+    except Exception:  # pragma: no cover
+        pass
 
 
 @dataclass
@@ -65,26 +72,43 @@ def _first_env(*names: str, default: int = 0) -> int:
     return default
 
 
-def _read_topology() -> Tuple[int, int, int]:
-    """Return ``(rank, world_size, local_rank)``, querying MPI before env vars."""
-    try:
-        from mpi4py import MPI
+_WORLD_ENV = ("PALS_NRANKS", "PMI_SIZE", "WORLD_SIZE", "OMPI_COMM_WORLD_SIZE")
+_RANK_ENV = ("PALS_RANKID", "PMI_RANK", "RANK", "OMPI_COMM_WORLD_RANK")
+_LOCAL_ENV = ("PALS_LOCAL_RANKID", "MPI_LOCALRANKID", "PMI_LOCAL_RANK",
+              "LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK")
 
-        comm = MPI.COMM_WORLD
-        world = comm.Get_size()
-        if world > 1:
-            rank = comm.Get_rank()
-            local = comm.Split_type(MPI.COMM_TYPE_SHARED).Get_rank()
-            return rank, world, local
-    except Exception:
-        pass
-    world = _first_env("PALS_NRANKS", "PMI_SIZE", "WORLD_SIZE", "OMPI_COMM_WORLD_SIZE", default=1)
-    rank = _first_env("PALS_RANKID", "PMI_RANK", "RANK", "OMPI_COMM_WORLD_RANK", default=0)
-    local = _first_env(
-        "PALS_LOCAL_RANKID", "MPI_LOCALRANKID", "PMI_LOCAL_RANK",
-        "LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK", default=0,
-    )
-    return rank, world, local
+
+def _read_topology(allow_mpi: bool = True) -> Tuple[int, int, int]:
+    """Return ``(rank, world_size, local_rank)``.
+
+    Prefers the **launcher environment variables** (PALS_* under Aurora's ``mpiexec``,
+    or PMI/torch equivalents). These are set by the launcher with NO fabric or MPI
+    initialisation, so reading them never touches the CXI NIC -- essential for the
+    embarrassingly-parallel jobs (``score`` / ``gen-targets``) which otherwise would
+    call ``MPI_Init`` (via mpi4py) purely to learn their rank and, at scale, hit
+    "CXI alloc failed ... exceeds ... limits" at launch.
+
+    Only falls back to mpi4py (which DOES open the fabric) when the env vars are
+    absent AND ``allow_mpi`` is set -- i.e. when a real collective backend is wanted.
+    """
+    if any(k in os.environ for k in _WORLD_ENV):
+        world = _first_env(*_WORLD_ENV, default=1)
+        rank = _first_env(*_RANK_ENV, default=0)
+        local = _first_env(*_LOCAL_ENV, default=0)
+        return rank, world, local
+    if allow_mpi:
+        try:
+            from mpi4py import MPI
+
+            comm = MPI.COMM_WORLD
+            world = comm.Get_size()
+            if world > 1:
+                rank = comm.Get_rank()
+                local = comm.Split_type(MPI.COMM_TYPE_SHARED).Get_rank()
+                return rank, world, local
+        except Exception:
+            pass
+    return 0, 1, 0
 
 
 def pick_device(device_name: str = "auto", local_rank: int = 0) -> torch.device:
@@ -132,19 +156,31 @@ def init_distributed(
     device_name: str = "auto",
     *,
     init_pg: bool = False,
+    allow_mpi: Optional[bool] = None,
 ) -> DistInfo:
     """Bootstrap rank/world/device (and optionally a process group).
 
-    Set ``init_pg=False`` (default) for FASTA scoring: each rank just needs its
-    identity to pick a shard; synchronisation is an MPI barrier. Set
-    ``init_pg=True`` to also start a collective backend for data-parallel training.
+    Set ``init_pg=False`` (default) for FASTA scoring / target generation: each rank
+    just needs its identity to pick a strided shard and writes its own output file --
+    NO inter-rank communication, so nothing touches the fabric. Set ``init_pg=True``
+    to also start a collective backend for data-parallel training.
+
+    ``allow_mpi`` controls whether topology detection may fall back to ``mpi4py``
+    (which calls ``MPI_Init`` and opens the CXI fabric). It defaults to ``init_pg``:
+    the embarrassingly-parallel path never imports mpi4py and therefore cannot trip
+    the "CXI alloc failed" launch error, while the collective path may. Launcher env
+    vars (PALS_*) are always tried first regardless.
     """
-    rank, world, local = _read_topology()
+    if allow_mpi is None:
+        allow_mpi = init_pg
+    rank, world, local = _read_topology(allow_mpi=allow_mpi)
     device = pick_device(device_name, local)
     info = DistInfo(rank=rank, world_size=world, local_rank=local, device=device)
     if not init_pg or world <= 1:
         return info
 
+    if device.type == "xpu":
+        _load_oneccl()  # register the ccl backend only now (collective path)
     backend = _pick_backend(device)
     os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
     os.environ.setdefault("MASTER_PORT", "29500")
@@ -164,18 +200,27 @@ def init_distributed(
 
 
 def barrier(info: DistInfo) -> None:
-    """Synchronise ranks; falls back to an MPI barrier when no PG exists."""
+    """Synchronise ranks, if a synchronisation mechanism is already up.
+
+    Uses the torch PG when initialised. Otherwise uses an MPI barrier ONLY if mpi4py
+    is already imported and MPI initialised -- it will NOT import mpi4py (and open the
+    fabric) just to barrier. For the embarrassingly-parallel jobs there is nothing to
+    synchronise, so this is a no-op, which is correct: each rank writes its own file.
+    """
     if info.world_size <= 1:
         return
     if info.pg_initialized and torch.distributed.is_initialized():
         torch.distributed.barrier()
         return
-    try:
-        from mpi4py import MPI
+    mpi = sys.modules.get("mpi4py")
+    if mpi is not None:
+        try:
+            from mpi4py import MPI
 
-        MPI.COMM_WORLD.Barrier()
-    except Exception:
-        pass
+            if MPI.Is_initialized():
+                MPI.COMM_WORLD.Barrier()
+        except Exception:
+            pass
 
 
 def cleanup(info: DistInfo) -> None:

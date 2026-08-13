@@ -44,9 +44,13 @@ MAX_LEN=512
 export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
-# --- oneCCL / fabric (match mini-embed-filip pbs_common.sh; REQUIRED at scale) ---
-# Without these the CXI (Slingshot) NIC runs out of PTEs/TXQs/LEs/... at launch:
-#   "CXI alloc failed on cxiN: request exceeds ... limits" -> mpiexec start fails.
+# --- oneCCL / fabric --------------------------------------------------------------
+# gen-targets is embarrassingly parallel and, as of this version, is MPI-FREE: each
+# rank reads its rank/size from the PALS_* launcher env (no mpi4py, no MPI_Init) and
+# writes its own shard, so nothing opens the CXI NIC. That is the real fix for the
+# "CXI alloc failed on cxiN: request exceeds ... limits" launch error. The oneCCL
+# vars below are inert for this job (kept only so the same env works if you ever run
+# a collective/DP path); MPICH_GPU_SUPPORT_ENABLED=0 is safe here regardless.
 export CCL_PROCESS_LAUNCHER=pmix
 export CCL_ATL_TRANSPORT=mpi          # CCL rides MPI's endpoints -> no separate CXI alloc
 export CCL_KVS_MODE=mpi
