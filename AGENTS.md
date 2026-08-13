@@ -35,6 +35,7 @@ Read [`docs/INTEGRATION.md`](docs/INTEGRATION.md) — it is written for you. Sum
 | the reference encoder loaders | `ofsperplexity/models/{esmc,amplify}.py` |
 | CLI | `ofsperplexity/cli.py` (`ofs-pppl {score,gen-targets,train}`) |
 | design rationale & caveats | `docs/METHOD.md` |
+| sizing head-training jobs on Aurora | `docs/SIZING.md` |
 
 ## Invariants to preserve
 

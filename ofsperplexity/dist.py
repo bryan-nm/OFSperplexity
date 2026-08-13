@@ -105,8 +105,10 @@ def pick_device(device_name: str = "auto", local_rank: int = 0) -> torch.device:
         idx = local_rank % n
         torch.cuda.set_device(idx)
         return torch.device(f"cuda:{idx}")
-    if device_name == "mps" or (device_name == "auto" and getattr(torch.backends, "mps", None)
-                                and torch.backends.mps.is_available()):
+    # MPS is honoured only when *explicitly* requested -- Apple's fp16/LayerNorm
+    # kernels are numerically flaky for the OFS head ensemble and can yield NaNs.
+    # `auto` therefore falls through to CPU on a Mac (matches mini-embed-filip).
+    if device_name == "mps":
         return torch.device("mps")
     return torch.device("cpu")
 

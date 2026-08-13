@@ -9,9 +9,11 @@
 #PBS -j oe
 #
 # Fit the OFS head from precomputed targets (see gen_targets.pbs). The head is
-# ~7M params -- a single tile, single process, minutes. If you skipped
-# gen_targets, this script can also generate targets inline from a FASTA (slower);
-# see the commented alternative below.
+# ~7M params -- a single tile, single process, ~10-15 min regardless of tier, so
+# this stays select=1 / debug. The trainer streams mini-batches from host RAM, but
+# `--targets` are concatenated in RAM: keep the set within node memory (Aurora nodes
+# have >=512 GB; the Recommended 100K/58 GB tier is fine) and cap rows with
+# `--max-positions` (~15M is plenty for a 7M-param head). See docs/SIZING.md.
 #
 # Submit from the repo root:  qsub scripts/train_head.pbs
 
@@ -33,7 +35,8 @@ python -m ofsperplexity.cli train \
     --device xpu \
     --targets $TARGETS_GLOB \
     --head "$HEAD_OUT" \
-    --num-members 8 --epochs 40 --train-batch-size 4096 --lr 1e-3
+    --num-members 8 --epochs 40 --train-batch-size 4096 --lr 1e-3 \
+    --max-positions 15000000
 
 # --- Alternative: generate targets inline from a FASTA (no gen_targets step) ---
 # python -m ofsperplexity.cli train --device xpu \

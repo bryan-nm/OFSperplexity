@@ -122,9 +122,11 @@ def cmd_gen_targets(args) -> None:
     if args.max_len:
         records = [r for r in records if len(r[1]) <= args.max_len]
     mine = [records[i] for i in shard_indices(len(records), info)]
+    store_dtype = getattr(torch, args.store_dtype)
     ts = generate_targets(
         enc.adapter, mine, enc.encode_fn,
-        max_forward_tokens=args.max_forward_tokens, progress=info.is_main,
+        max_forward_tokens=args.max_forward_tokens, store_dtype=store_dtype,
+        progress=info.is_main,
     )
     out = args.out if info.world_size == 1 else f"{args.out}.rank{info.rank:04d}"
     ts.save(out)
@@ -147,13 +149,14 @@ def cmd_train(args) -> None:
         if args.max_len:
             records = [r for r in records if len(r[1]) <= args.max_len]
         ts = generate_targets(enc.adapter, records, enc.encode_fn,
-                              max_forward_tokens=args.max_forward_tokens, progress=True)
+                              max_forward_tokens=args.max_forward_tokens,
+                              store_dtype=getattr(torch, args.store_dtype), progress=True)
         input_dim = enc.adapter.hidden_size
 
     cfg = TrainConfig(
         num_members=args.num_members, epochs=args.epochs, batch_size=args.train_batch_size,
         lr=args.lr, weight_decay=args.weight_decay, val_fraction=args.val_fraction,
-        device=args.device, seed=args.seed,
+        device=args.device, seed=args.seed, max_positions=args.max_positions,
     )
     head, history = train_ofs_head(ts, input_dim, cfg)
     head.save(args.head)
@@ -184,6 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--out", required=True, help="Output .pt (per-rank .rankNNNN under MPI).")
     pg.add_argument("--max-len", type=int, default=700, help="Skip sequences longer than this.")
     pg.add_argument("--max-forward-tokens", type=int, default=16384)
+    pg.add_argument("--store-dtype", default="float16", choices=["float16", "bfloat16", "float32"],
+                    help="dtype for the stored embeddings/profiles (fp16 halves the target footprint).")
     pg.set_defaults(func=cmd_gen_targets)
 
     pt = sub.add_parser("train", help="Fit an OFS head from targets or a FASTA.")
@@ -196,6 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--head", required=True, help="Output head checkpoint path.")
     pt.add_argument("--max-len", type=int, default=700)
     pt.add_argument("--max-forward-tokens", type=int, default=16384)
+    pt.add_argument("--store-dtype", default="float16", choices=["float16", "bfloat16", "float32"],
+                    help="dtype for inline-generated targets (ignored when --targets is given).")
+    pt.add_argument("--max-positions", type=int, default=None,
+                    help="Subsample this many distillation rows before fitting (bounds RAM/time).")
     pt.add_argument("--num-members", type=int, default=8)
     pt.add_argument("--epochs", type=int, default=40)
     pt.add_argument("--train-batch-size", type=int, default=4096)

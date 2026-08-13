@@ -170,4 +170,6 @@ tests/           test_smoke.py
 
 See [`docs/METHOD.md`](docs/METHOD.md) for how each design decision maps to the
 paper, and the important caveats (per-encoder heads, alphabet restriction, what the
-head does and does not approximate).
+head does and does not approximate). For **sizing the head-training jobs on Aurora**
+(how many nodes / how long to generate targets over a UniRef90-scale set), see
+[`docs/SIZING.md`](docs/SIZING.md).

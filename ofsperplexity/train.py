@@ -121,6 +121,8 @@ class TrainConfig:
     dropout: float = 0.0
     seed: int = 0
     device: str = "auto"
+    max_positions: Optional[int] = None  # subsample the distillation rows (bounds RAM/time)
+    grad_clip: float = 1.0  # max grad norm; guards against divergence (0 disables)
 
 
 def _soft_cross_entropy(logits: torch.Tensor, target_profile: torch.Tensor) -> torch.Tensor:
@@ -143,13 +145,27 @@ def train_ofs_head(
     dev = device or pick_device(config.device)
     torch.manual_seed(config.seed)
 
-    N = len(target_set)
+    # Keep the (large) distillation tensors in HOST memory and stream mini-batches to
+    # the device. The embeddings dominate storage -- at UniRef90 scale they are tens
+    # to hundreds of GB and must not live on a single tile. The MLP is tiny, so the
+    # per-batch host->device copy (a few MB) is negligible next to compute.
+    emb_cpu = target_set.embeddings
+    prof_cpu = target_set.profiles
+
+    N = emb_cpu.shape[0]
     perm = torch.randperm(N)
+    if config.max_positions is not None and config.max_positions < N:
+        perm = perm[: config.max_positions]  # subsample rows to bound RAM / time
+        N = config.max_positions
     n_val = max(1, int(N * config.val_fraction))
     val_idx, train_idx = perm[:n_val], perm[n_val:]
 
-    emb = target_set.embeddings.to(dev)
-    prof = target_set.profiles.to(dev)
+    # The validation set is small (val_fraction of N) -- park it on the device once.
+    # Targets may be stored fp16 to save space; cast to fp32 ON THE HOST before the
+    # device transfer so no accelerator ever runs an fp16 op (MPS mis-handles the
+    # on-device fp16->fp32 cast and yields NaNs; the head always computes in fp32).
+    val_x = emb_cpu[val_idx].float().to(dev)
+    val_t = prof_cpu[val_idx].float().to(dev)
 
     head_cfg = OFSHeadConfig(
         input_dim=input_dim,
@@ -168,8 +184,8 @@ def train_ofs_head(
         nb = 0
         for start in range(0, shuffle.numel(), config.batch_size):
             idx = shuffle[start : start + config.batch_size]
-            x = emb[idx]
-            t = prof[idx]
+            x = emb_cpu[idx].float().to(dev, non_blocking=True)
+            t = prof_cpu[idx].float().to(dev, non_blocking=True)
             # each member sees an independently shuffled view -> ensemble diversity
             member_logits = head.member_logits(x)  # (M, B, 20)
             loss = torch.stack(
@@ -177,6 +193,8 @@ def train_ofs_head(
             ).sum()
             opt.zero_grad(set_to_none=True)
             loss.backward()
+            if config.grad_clip and config.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(head.parameters(), config.grad_clip)
             opt.step()
             running += loss.item()
             nb += 1
@@ -184,9 +202,9 @@ def train_ofs_head(
 
         head.eval()
         with torch.no_grad():
-            vlogits = head.member_logits(emb[val_idx])
+            vlogits = head.member_logits(val_x)
             val_loss = torch.stack(
-                [_soft_cross_entropy(vlogits[m], prof[val_idx]) for m in range(head_cfg.num_members)]
+                [_soft_cross_entropy(vlogits[m], val_t) for m in range(head_cfg.num_members)]
             ).mean().item()
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
