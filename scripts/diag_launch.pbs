@@ -18,6 +18,10 @@ cd "${PBS_O_WORKDIR:?submit with qsub from the repo root}" || exit 1
 module load frameworks
 source /flare/NLDesignProtein/bryan/envs/ofs-env/bin/activate
 
+# Mirror the real job's device env so probes 9/10 reflect gen_targets' XPU config.
+export ONEAPI_DEVICE_SELECTOR="level_zero:gpu"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+
 RANKS_PER_NODE=12
 NNODES=$(wc -l < "$PBS_NODEFILE")
 NRANKS=$(( NNODES * RANKS_PER_NODE ))
