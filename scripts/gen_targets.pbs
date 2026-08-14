@@ -64,6 +64,10 @@ export MPICH_GPU_SUPPORT_ENABLED=0
 RANKS_PER_NODE=12
 NNODES=$(wc -l < "$PBS_NODEFILE")
 NRANKS=$(( NNODES * RANKS_PER_NODE ))
+# Give the app the topology we already know, so each rank shards correctly even if
+# PALS exports only PMIX_RANK (not PALS_NRANKS). Forwarded to ranks by mpiexec.
+export OFS_WORLD_SIZE=$NRANKS
+export OFS_RANKS_PER_NODE=$RANKS_PER_NODE
 
 echo "job=$PBS_JOBID nodes=$NNODES ranks=$NRANKS -> $OUT.rankNNNN.pt"
 

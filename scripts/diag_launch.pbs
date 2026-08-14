@@ -22,6 +22,8 @@ RANKS_PER_NODE=12
 NNODES=$(wc -l < "$PBS_NODEFILE")
 NRANKS=$(( NNODES * RANKS_PER_NODE ))
 PYTHON=$(command -v python)
+MODEL_KIND=amplify
+MODEL_PATH=/flare/NLDesignProtein/bryan/models/SaAMPLIFY_350M
 
 echo "=================== ENV ==================="
 echo "mpiexec = $(command -v mpiexec || echo NOT-FOUND)"
@@ -63,4 +65,19 @@ echo "rc7=$?"; echo
 echo "=== probe 8: alternate binding syntax --cpu-bind depth (no -d) ==="
 mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix --cpu-bind depth hostname
 echo "rc8=$?"; echo
+
+echo "=== probe 9: which topology env vars do ranks see? + xpu.device_count (4 ranks) ==="
+mpiexec -n 4 -ppn 4 --pmi=pmix "$PYTHON" -c "import os; \
+ks=sorted(k for k in os.environ if any(s in k.upper() for s in ('PALS','PMIX','PMI_','RANK','WORLD','LOCAL','OFS_'))); \
+print('topo_env:', {k: os.environ[k] for k in ks}); \
+import torch; import intel_extension_for_pytorch as ipex; \
+print('xpu.device_count =', torch.xpu.device_count() if hasattr(torch,'xpu') else 'no xpu')"
+echo "rc9=$?"; echo
+
+echo "=== probe 10: SINGLE-rank AMPLIFY forward on XPU (isolate GPU segfault) ==="
+printf '>s1\nMSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGK\n>s2\nMKKLLPTAAAGLLLLAAQPAMAACDEFGHIK\n' > /tmp/ofs_xpu_smoke.fasta
+mpiexec -n 1 -ppn 1 "$PYTHON" -m ofsperplexity.cli gen-targets \
+    --device xpu --model-kind "$MODEL_KIND" --model-path "$MODEL_PATH" \
+    --input /tmp/ofs_xpu_smoke.fasta --out /tmp/ofs_xpu_smoke.pt --max-len 512 --store-dtype float16
+echo "rc10=$?"; echo
 echo "=================== DONE ==================="

@@ -72,29 +72,40 @@ def _first_env(*names: str, default: int = 0) -> int:
     return default
 
 
-_WORLD_ENV = ("PALS_NRANKS", "PMI_SIZE", "WORLD_SIZE", "OMPI_COMM_WORLD_SIZE")
-_RANK_ENV = ("PALS_RANKID", "PMI_RANK", "RANK", "OMPI_COMM_WORLD_RANK")
-_LOCAL_ENV = ("PALS_LOCAL_RANKID", "MPI_LOCALRANKID", "PMI_LOCAL_RANK",
+# Per-rank id vars set by various launchers. PMIX_RANK is set by PALS when launched
+# with --pmi=pmix even though PALS_RANKID sometimes is not; OFS_* are set by our own
+# PBS scripts from the topology they already know (NRANKS / RANKS_PER_NODE).
+_RANK_ENV = ("PALS_RANKID", "PMIX_RANK", "PMI_RANK", "RANK", "OMPI_COMM_WORLD_RANK")
+_WORLD_ENV = ("PALS_NRANKS", "OFS_WORLD_SIZE", "PMIX_SIZE", "PMI_SIZE",
+              "WORLD_SIZE", "OMPI_COMM_WORLD_SIZE")
+_LOCAL_ENV = ("PALS_LOCAL_RANKID", "PMIX_LOCAL_RANK", "MPI_LOCALRANKID", "PMI_LOCAL_RANK",
               "LOCAL_RANK", "OMPI_COMM_WORLD_LOCAL_RANK")
 
 
 def _read_topology(allow_mpi: bool = True) -> Tuple[int, int, int]:
     """Return ``(rank, world_size, local_rank)``.
 
-    Prefers the **launcher environment variables** (PALS_* under Aurora's ``mpiexec``,
-    or PMI/torch equivalents). These are set by the launcher with NO fabric or MPI
-    initialisation, so reading them never touches the CXI NIC -- essential for the
-    embarrassingly-parallel jobs (``score`` / ``gen-targets``) which otherwise would
-    call ``MPI_Init`` (via mpi4py) purely to learn their rank and, at scale, hit
-    "CXI alloc failed ... exceeds ... limits" at launch.
+    Prefers the **launcher environment variables** -- read with NO fabric or MPI
+    initialisation, so it never touches the CXI NIC (essential for the
+    embarrassingly-parallel jobs, which otherwise call ``MPI_Init`` via mpi4py purely
+    to learn their rank and, at scale, hit "CXI alloc failed ... limits" at launch).
 
-    Only falls back to mpi4py (which DOES open the fabric) when the env vars are
-    absent AND ``allow_mpi`` is set -- i.e. when a real collective backend is wanted.
+    Gated on a *per-rank* id being present (``_RANK_ENV``): a world-size var alone is
+    not enough, since without a distinct rank every process would claim rank 0. When a
+    rank id is present, world comes from ``_WORLD_ENV`` (PALS_NRANKS, or OFS_WORLD_SIZE
+    exported by our PBS scripts) and local rank from ``_LOCAL_ENV`` or, failing that,
+    ``rank % OFS_RANKS_PER_NODE``.
+
+    Falls back to mpi4py (which opens the fabric) only when no rank env is present AND
+    ``allow_mpi`` is set -- i.e. a real collective backend is wanted.
     """
-    if any(k in os.environ for k in _WORLD_ENV):
-        world = _first_env(*_WORLD_ENV, default=1)
+    if any(k in os.environ for k in _RANK_ENV):
         rank = _first_env(*_RANK_ENV, default=0)
-        local = _first_env(*_LOCAL_ENV, default=0)
+        world = _first_env(*_WORLD_ENV, default=1)
+        local = _first_env(*_LOCAL_ENV, default=-1)
+        if local < 0:
+            rpn = _first_env("OFS_RANKS_PER_NODE", "PALS_LOCAL_SIZE", default=0)
+            local = (rank % rpn) if rpn > 0 else 0
         return rank, world, local
     if allow_mpi:
         try:
