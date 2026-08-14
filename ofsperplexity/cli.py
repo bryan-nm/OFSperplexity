@@ -38,9 +38,14 @@ def _log_topology(info: DistInfo) -> None:
     the shard split."""
     print(f"[dist] rank {info.rank}/{info.world_size} local={info.local_rank} "
           f"device={info.device}", file=sys.stderr, flush=True)
-    if info.world_size == 1 and any(k in os.environ for k in ("PBS_JOBID", "PALS_NRANKS")):
-        print("[dist] WARNING: world_size=1 under a batch launcher -- ranks are not "
-              "sharding. Check the launcher sets PALS_NRANKS (see scripts/*.pbs).",
+    # Only warn when we were clearly launched multi-rank (a per-rank launcher id is
+    # present) but world collapsed to 1. Single-process jobs -- e.g. `train`, which
+    # runs one plain `python` with no mpiexec -- have world_size==1 legitimately and
+    # must NOT warn.
+    launched_multi = any(k in os.environ for k in ("PALS_RANKID", "PMIX_RANK", "PMI_RANK"))
+    if info.world_size == 1 and launched_multi:
+        print("[dist] WARNING: launched under mpiexec but world_size=1 -- ranks are "
+              "not sharding. Ensure the PBS script exports OFS_WORLD_SIZE (see scripts/*.pbs).",
               file=sys.stderr, flush=True)
 
 
