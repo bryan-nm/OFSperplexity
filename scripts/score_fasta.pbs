@@ -65,8 +65,12 @@ echo "[preflight] python = $PYTHON"
 "$PYTHON" -c "import ofsperplexity, torch; print('[preflight] import OK; torch', torch.__version__)" \
     || { echo "[preflight] FAILED to import ofsperplexity/torch -- check the venv + 'pip install -e .'"; exit 1; }
 
+rm -f "$OUT".rank*   # clear any stale per-rank shards from a previous run
+
 # --cpu-bind depth -d N makes PALS 1.8 fail to launch here (exit 127); omitted --
 # it is only a host-side perf tweak and this is an XPU job. See scripts/diag_launch.pbs.
+# Each rank writes its own $OUT.rankNNNN shard (no in-job merge -- the barrier is a
+# deliberate no-op in this MPI-free launch).
 mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix \
     "$PYTHON" -m ofsperplexity.cli score \
         --device xpu \
@@ -74,5 +78,12 @@ mpiexec -n "$NRANKS" -ppn "$RANKS_PER_NODE" --pmi=pmix \
         --method ofs --head "$HEAD" \
         --input "$INPUT" --out "$OUT" \
         --max-tokens 16384
+rc=$?
+echo "score exit=$rc"
 
+# Merge the per-rank shards into one TSV. Safe here: mpiexec has returned, so every
+# rank has finished writing. Single process, no launcher.
+if [ "$rc" -eq 0 ]; then
+    "$PYTHON" -m ofsperplexity.cli merge --out "$OUT"
+fi
 echo "exit=$?"

@@ -96,29 +96,24 @@ def _rows(ids, res) -> List[Tuple[str, float, float, int]]:
     return list(zip(ids, res.pseudo_perplexity.tolist(), res.pll.tolist(), res.n_scored.tolist()))
 
 
+SCORE_HEADER = "id\tpseudo_perplexity\tpll\tn_scored"
+
+
 def _write_rows(rows, args, info: DistInfo) -> None:
-    header = "id\tpseudo_perplexity\tpll\tn_scored"
-    if info.world_size > 1 and args.out:
+    if args.out and info.world_size > 1:
+        # Each rank writes ONLY its own part. No in-rank merge: rank 0 racing ahead of
+        # the other ranks' writes caused a FileNotFoundError, and the barrier is a
+        # deliberate no-op (MPI-free). The parts are merged after mpiexec returns --
+        # `ofs-pppl merge` (the PBS script calls it), which is safe because mpiexec
+        # blocks until every rank has finished writing.
         part = f"{args.out}.rank{info.rank:04d}"
-        _dump_tsv(part, header, rows)
-        barrier(info)
-        if info.is_main:
-            merged = []
-            for r in range(info.world_size):
-                p = f"{args.out}.rank{r:04d}"
-                with open(p) as fh:
-                    next(fh)  # skip header
-                    merged.extend(fh.read().splitlines())
-                os.remove(p)
-            with open(args.out, "w") as fh:
-                fh.write(header + "\n")
-                fh.write("\n".join(merged) + "\n")
-            print(f"[score] wrote {len(merged)} rows -> {args.out}", flush=True)
+        _dump_tsv(part, SCORE_HEADER, rows)
+        print(f"[score] rank {info.rank}: {len(rows)} rows -> {part}", flush=True)
     elif args.out:
-        _dump_tsv(args.out, header, rows)
+        _dump_tsv(args.out, SCORE_HEADER, rows)
         print(f"[score] wrote {len(rows)} rows -> {args.out}", flush=True)
     else:
-        print(header)
+        print(SCORE_HEADER)
         for name, pp, pll, n in rows:
             print(f"{name}\t{pp:.6f}\t{pll:.6f}\t{n}")
 
@@ -128,6 +123,40 @@ def _dump_tsv(path, header, rows) -> None:
         fh.write(header + "\n")
         for name, pp, pll, n in rows:
             fh.write(f"{name}\t{pp:.6f}\t{pll:.6f}\t{n}\n")
+
+
+# ---------------------------------------------------------------------- merge
+def cmd_merge(args) -> None:
+    """Concatenate per-rank score shards (`<out>.rankNNNN`) into one TSV.
+
+    Single-process; run AFTER the mpiexec score job so every part exists. Idempotent-
+    ish: if no parts are found but <out> already exists (e.g. a 1-rank run wrote it
+    directly), it exits cleanly.
+    """
+    import glob
+
+    parts = sorted(glob.glob(f"{args.out}.rank*"))
+    if not parts:
+        if os.path.exists(args.out):
+            print(f"[merge] no parts; {args.out} already present -- nothing to do", flush=True)
+            return
+        print(f"[merge] ERROR: no parts matching {args.out}.rank* and no {args.out}",
+              file=sys.stderr, flush=True)
+        sys.exit(1)
+    n = 0
+    with open(args.out, "w") as out:
+        out.write(SCORE_HEADER + "\n")
+        for p in parts:
+            with open(p) as fh:
+                lines = fh.read().splitlines()
+            for line in lines[1:]:  # drop each part's header
+                if line:
+                    out.write(line + "\n")
+                    n += 1
+    if not args.keep_parts:
+        for p in parts:
+            os.remove(p)
+    print(f"[merge] merged {len(parts)} parts, {n} rows -> {args.out}", flush=True)
 
 
 # ---------------------------------------------------------------- gen-targets
@@ -200,6 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--max-tokens", type=int, default=16384)
     ps.add_argument("--max-forward-tokens", type=int, default=16384)
     ps.set_defaults(func=cmd_score)
+
+    pm = sub.add_parser("merge", help="Merge per-rank score shards (<out>.rankNNNN) into one TSV.")
+    pm.add_argument("--out", required=True, help="Final TSV; reads <out>.rank* parts and removes them.")
+    pm.add_argument("--keep-parts", action="store_true", help="Keep the per-rank parts after merging.")
+    pm.set_defaults(func=cmd_merge)
 
     pg = sub.add_parser("gen-targets", help="Exact one-at-a-time distillation targets.")
     _add_common_model_args(pg)
